@@ -1,3 +1,28 @@
+## rosbag2_storage_mcap (rolling) - 0.1.6-2
+
+The packages in the `rosbag2_storage_mcap` repository were released into the `rolling` distro by running `/usr/bin/bloom-release rosbag2_storage_mcap --ros-distro rolling` on `Fri, 22 Jul 2022 18:08:30 -0000`
+
+These packages were released:
+- `mcap_vendor`
+- `rosbag2_storage_mcap`
+
+Version of package(s) in repository `rosbag2_storage_mcap`:
+
+- upstream repository: https://github.com/ros-tooling/rosbag2_storage_mcap.git
+- release repository: https://github.com/ros2-gbp/rosbag2_storage_mcap-release.git
+- rosdistro version: `0.1.5-1`
+- old version: `0.1.6-1`
+- new version: `0.1.6-2`
+
+Versions of tools used:
+
+- bloom version: `0.11.2`
+- catkin_pkg version: `0.5.2`
+- rosdep version: `0.22.1`
+- rosdistro version: `0.9.0`
+- vcstools version: `0.1.42`
+
+
 ## rosbag2_storage_mcap (rolling) - 0.1.6-1
 
 The packages in the `rosbag2_storage_mcap` repository were released into the `rolling` distro by running `/usr/bin/bloom-release rosbag2_storage_mcap --ros-distro rolling` on `Fri, 22 Jul 2022 18:05:50 -0000`
