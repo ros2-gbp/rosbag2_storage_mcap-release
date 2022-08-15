@@ -1,3 +1,28 @@
+## rosbag2_storage_mcap (humble) - 0.1.7-1
+
+The packages in the `rosbag2_storage_mcap` repository were released into the `humble` distro by running `/home/emerson/.local/bin/bloom-release --rosdistro humble rosbag2_storage_mcap` on `Mon, 15 Aug 2022 21:36:26 -0000`
+
+These packages were released:
+- `mcap_vendor`
+- `rosbag2_storage_mcap`
+
+Version of package(s) in repository `rosbag2_storage_mcap`:
+
+- upstream repository: https://github.com/ros-tooling/rosbag2_storage_mcap.git
+- release repository: https://github.com/ros2-gbp/rosbag2_storage_mcap-release.git
+- rosdistro version: `0.1.6-1`
+- old version: `0.1.6-1`
+- new version: `0.1.7-1`
+
+Versions of tools used:
+
+- bloom version: `0.11.2`
+- catkin_pkg version: `0.4.16`
+- rosdep version: `0.22.1`
+- rosdistro version: `0.8.0`
+- vcstools version: `0.1.42`
+
+
 ## rosbag2_storage_mcap (galactic) - 0.1.7-1
 
 The packages in the `rosbag2_storage_mcap` repository were released into the `galactic` distro by running `/home/emerson/.local/bin/bloom-release --rosdistro galactic rosbag2_storage_mcap` on `Mon, 15 Aug 2022 21:34:23 -0000`
