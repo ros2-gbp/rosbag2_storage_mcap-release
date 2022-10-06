@@ -29,6 +29,10 @@ add_library(${PROJECT_NAME} SHARED
   src/mcap_storage.cpp
   src/message_definition_cache.cpp
 )
+target_include_directories(${PROJECT_NAME} PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
+)
 target_compile_features(${PROJECT_NAME} PUBLIC c_std_99 cxx_std_17)
 ament_target_dependencies(${PROJECT_NAME}
   mcap_vendor
@@ -36,16 +40,26 @@ ament_target_dependencies(${PROJECT_NAME}
   rcutils
   rosbag2_storage)
 
-if(${rosbag2_storage_VERSION} VERSION_GREATER_EQUAL 0.10.0)
-  target_compile_definitions(${PROJECT_NAME} PRIVATE
-    ROSBAG2_STORAGE_MCAP_OVERRIDE_SEEK_METHOD
-  )
-endif()
+set(MCAP_COMPILE_DEFS)
+# COMPATIBILITY(foxy) - 0.3.x is the Foxy release
 if(${rosbag2_storage_VERSION} VERSION_GREATER_EQUAL 0.4.0)
-  target_compile_definitions(${PROJECT_NAME} PRIVATE
-    ROSBAG2_STORAGE_MCAP_HAS_STORAGE_OPTIONS
-  )
+  list(APPEND MCAP_COMPILE_DEFS ROSBAG2_STORAGE_MCAP_HAS_STORAGE_OPTIONS)
+  list(APPEND MCAP_COMPILE_DEFS ROSBAG2_STORAGE_MCAP_WRITER_CREATES_DIRECTORY)
 endif()
+# COMPATIBILITY(galactic) - 0.9.x is the Galactic release
+if(${rosbag2_storage_VERSION} VERSION_GREATER_EQUAL 0.10.0)
+  list(APPEND MCAP_COMPILE_DEFS ROSBAG2_STORAGE_MCAP_OVERRIDE_SEEK_METHOD)
+endif()
+# COMPATIBILITY(foxy, galactic) - 0.15.x is the Humble release
+if(${rosbag2_storage_VERSION} VERSION_GREATER_EQUAL 0.15.0)
+  list(APPEND MCAP_COMPILE_DEFS ROSBAG2_STORAGE_MCAP_HAS_YAML_HPP)
+endif()
+# COMPATIBILITY(foxy, galactic, humble) - 0.17.x is the Rolling release.
+if(${rosbag2_storage_VERSION} VERSION_GREATER_EQUAL 0.17.0)
+  list(APPEND MCAP_COMPILE_DEFS ROSBAG2_STORAGE_MCAP_HAS_STORAGE_FILTER_TOPIC_REGEX)
+endif()
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE ${MCAP_COMPILE_DEFS})
 
 # Causes the visibility macros to use dllexport rather than dllimport,
 # which is appropriate when building the dll but not consuming it.
@@ -76,13 +90,10 @@ if(BUILD_TESTING)
   ament_add_gmock(test_mcap_storage test/rosbag2_storage_mcap/test_mcap_storage.cpp)
   target_link_libraries(test_mcap_storage ${PROJECT_NAME})
   ament_target_dependencies(test_mcap_storage rosbag2_storage rosbag2_cpp rosbag2_test_common std_msgs)
-  # share compile defs from main library
-  get_target_property(test_mcap_storage_definitions ${PROJECT_NAME} COMPILE_DEFINITIONS)
-  target_compile_definitions(test_mcap_storage PRIVATE ${test_mcap_storage_definitions})
-  if(${rosbag2_cpp_VERSION} VERSION_GREATER_EQUAL 0.4.0)
-    target_compile_definitions(test_mcap_storage PRIVATE
-      ROSBAG2_STORAGE_MCAP_WRITER_CREATES_DIRECTORY)
-  endif()
+  target_compile_definitions(test_mcap_storage PRIVATE ${MCAP_COMPILE_DEFS})
+
+  ament_add_gmock(test_message_definition_cache test/rosbag2_storage_mcap/test_message_definition_cache.cpp)
+  target_link_libraries(test_message_definition_cache ${PROJECT_NAME})
 endif()
 
 
