@@ -2,6 +2,33 @@
 Changelog for package rosbag2_storage_mcap
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.4.0 (2022-10-06)
+------------------
+* Some minor improvements in rosbag2_storage_mcap after review (`#58 <https://github.com/ros-tooling/rosbag2_storage_mcap/issues/58>`_)
+  1. Fixed some findings from Clang-Tidy
+  1. Some renames according to the ROS2 coding style
+  1. Add default initializations for member variables
+  1. Moved code responsible for adding schema and channel from write(msg)
+  to create_topic(topic) method to reduce performance burden on first
+  message write and in lieu to preparation for moving schema collection
+  process to upper SequentialWriter layer.
+* Revert "rosbag2_storage_mcap: add storage preset profiles"
+  This reverts commit 38830add3935b978968fe2703d3180b413ccc8c2.
+* rosbag2_storage_mcap: add storage preset profiles
+* Contributors: James Smith, Michael Orlov
+
+0.3.0 (2022-09-09)
+------------------
+* Store IDL message definitions in Schema records when no MSG definition is available
+  (`#43 <https://github.com/ros-tooling/rosbag2_storage_mcap/issues/43>`_)
+* Contributors: James Smith
+
+0.2.0 (2022-09-08)
+------------------
+* Support timestamp-ordered playback (`#50 <https://github.com/ros-tooling/rosbag2_storage_mcap/issues/50>`_)
+* Support regex topic filtering
+* Contributors: James Smith
+
 0.1.7 (2022-08-15)
 ------------------
 * Add all lz4 sources to fix undefined symbols at runtime (`#46 <https://github.com/ros-tooling/rosbag2_storage_mcap/issues/46>`_)
