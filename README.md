@@ -1,3 +1,29 @@
+## rosbag2_storage_mcap (foxy) - 0.4.0-1
+
+The packages in the `rosbag2_storage_mcap` repository were released into the `foxy` distro by running `/usr/bin/bloom-release rosbag2_storage_mcap --ros-distro foxy` on `Thu, 06 Oct 2022 22:43:14 -0000`
+
+These packages were released:
+- `mcap_vendor`
+- `rosbag2_storage_mcap`
+- `rosbag2_storage_mcap_test_fixture_interfaces`
+
+Version of package(s) in repository `rosbag2_storage_mcap`:
+
+- upstream repository: https://github.com/ros-tooling/rosbag2_storage_mcap.git
+- release repository: https://github.com/ros2-gbp/rosbag2_storage_mcap-release.git
+- rosdistro version: `0.1.7-1`
+- old version: `0.1.7-1`
+- new version: `0.4.0-1`
+
+Versions of tools used:
+
+- bloom version: `0.11.2`
+- catkin_pkg version: `0.5.2`
+- rosdep version: `0.22.1`
+- rosdistro version: `0.9.0`
+- vcstools version: `0.1.42`
+
+
 ## rosbag2_storage_mcap (rolling) - 0.1.7-1
 
 The packages in the `rosbag2_storage_mcap` repository were released into the `rolling` distro by running `/home/emerson/.local/bin/bloom-release --rosdistro rolling rosbag2_storage_mcap` on `Mon, 15 Aug 2022 21:41:03 -0000`
