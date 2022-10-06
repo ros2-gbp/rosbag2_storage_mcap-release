@@ -1,0 +1,12 @@
+Source: ros-foxy-rosbag2-storage-mcap-test-fixture-interfaces
+Section: misc
+Priority: optional
+Maintainer: James Smith <james@foxglove.dev>
+Build-Depends: debhelper (>= 9.0.0), ros-foxy-ament-cmake, ros-foxy-ament-lint-auto <!nocheck>, ros-foxy-ament-lint-common <!nocheck>, ros-foxy-rosidl-default-generators, ros-foxy-ros-workspace, ros-foxy-rosidl-typesupport-fastrtps-c, ros-foxy-rosidl-typesupport-fastrtps-cpp, ros-foxy-rosidl-typesupport-connext-c, ros-foxy-rosidl-typesupport-connext-cpp
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-foxy-rosbag2-storage-mcap-test-fixture-interfaces
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-foxy-ros-workspace
+Description: message definition test fixtures for MCAP schema recording
