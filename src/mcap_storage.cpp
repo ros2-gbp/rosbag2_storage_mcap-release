@@ -12,11 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "message_definition_cache.hpp"
 #include "rcutils/logging_macros.h"
 #include "rosbag2_storage/metadata_io.hpp"
 #include "rosbag2_storage/ros_helper.hpp"
 #include "rosbag2_storage/storage_interfaces/read_write_interface.hpp"
+#include "rosbag2_storage_mcap/message_definition_cache.hpp"
+
+#ifdef ROSBAG2_STORAGE_MCAP_HAS_YAML_HPP
+#include "rosbag2_storage/yaml.hpp"
+#else
+// COMPATIBILITY(foxy, galactic) - this block is available in rosbag2_storage/yaml.hpp in H
+#ifdef _WIN32
+// This is necessary because of a bug in yaml-cpp's cmake
+#define YAML_CPP_DLL
+// This is necessary because yaml-cpp does not always use dllimport/dllexport consistently
+#pragma warning(push)
+#pragma warning(disable : 4251)
+#pragma warning(disable : 4275)
+#endif
+#include "yaml-cpp/yaml.h"
+#ifdef _WIN32
+#pragma warning(pop)
+#endif
+#endif
 
 #include <mcap/mcap.hpp>
 
@@ -26,15 +44,107 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
+#ifdef ROSBAG2_STORAGE_MCAP_HAS_STORAGE_FILTER_TOPIC_REGEX
+#include <regex>
+#endif
+
+#define DECLARE_YAML_VALUE_MAP(KEY_TYPE, VALUE_TYPE, ...)                   \
+  template <>                                                               \
+  struct convert<KEY_TYPE> {                                                \
+    static Node encode(const KEY_TYPE& e) {                                 \
+      static const std::pair<KEY_TYPE, VALUE_TYPE> mapping[] = __VA_ARGS__; \
+      for (const auto& m : mapping) {                                       \
+        if (m.first == e) {                                                 \
+          return Node(m.second);                                            \
+        }                                                                   \
+      }                                                                     \
+      return Node("");                                                      \
+    }                                                                       \
+                                                                            \
+    static bool decode(const Node& node, KEY_TYPE& e) {                     \
+      static const std::pair<KEY_TYPE, VALUE_TYPE> mapping[] = __VA_ARGS__; \
+      const auto val = node.as<VALUE_TYPE>();                               \
+      for (const auto& m : mapping) {                                       \
+        if (m.second == val) {                                              \
+          e = m.first;                                                      \
+          return true;                                                      \
+        }                                                                   \
+      }                                                                     \
+      return false;                                                         \
+    }                                                                       \
+  }
+
+namespace {
+
+// Simple wrapper with default constructor for use by YAML
+struct McapWriterOptions : mcap::McapWriterOptions {
+  McapWriterOptions()
+      : mcap::McapWriterOptions("ros2") {}
+};
+
+}  // namespace
+
+namespace YAML {
+
+#ifndef ROSBAG2_STORAGE_MCAP_HAS_YAML_HPP
+template <typename T>
+void optional_assign(const Node& node, std::string field, T& assign_to) {
+  if (node[field]) {
+    assign_to = node[field].as<T>();
+  }
+}
+#endif
+
+DECLARE_YAML_VALUE_MAP(mcap::Compression, std::string,
+                       {{mcap::Compression::None, "None"},
+                        {mcap::Compression::Lz4, "Lz4"},
+                        {mcap::Compression::Zstd, "Zstd"}});
+
+DECLARE_YAML_VALUE_MAP(mcap::CompressionLevel, std::string,
+                       {{mcap::CompressionLevel::Fastest, "Fastest"},
+                        {mcap::CompressionLevel::Fast, "Fast"},
+                        {mcap::CompressionLevel::Default, "Default"},
+                        {mcap::CompressionLevel::Slow, "Slow"},
+                        {mcap::CompressionLevel::Slowest, "Slowest"}});
+
+template <>
+struct convert<McapWriterOptions> {
+  // NOTE: when updating this struct, also update documentation in README.md
+  static bool decode(const Node& node, McapWriterOptions& o) {
+    optional_assign<bool>(node, "noCRC", o.noCRC);
+    optional_assign<bool>(node, "noChunking", o.noChunking);
+    optional_assign<bool>(node, "noMessageIndex", o.noMessageIndex);
+    optional_assign<bool>(node, "noSummary", o.noSummary);
+    optional_assign<uint64_t>(node, "chunkSize", o.chunkSize);
+    optional_assign<mcap::Compression>(node, "compression", o.compression);
+    optional_assign<mcap::CompressionLevel>(node, "compressionLevel", o.compressionLevel);
+    optional_assign<bool>(node, "forceCompression", o.forceCompression);
+    // Intentionally omitting "profile" and "library"
+    optional_assign<bool>(node, "noRepeatedSchemas", o.noRepeatedSchemas);
+    optional_assign<bool>(node, "noRepeatedChannels", o.noRepeatedChannels);
+    optional_assign<bool>(node, "noAttachmentIndex", o.noAttachmentIndex);
+    optional_assign<bool>(node, "noMetadataIndex", o.noMetadataIndex);
+    optional_assign<bool>(node, "noChunkIndex", o.noChunkIndex);
+    optional_assign<bool>(node, "noStatistics", o.noStatistics);
+    optional_assign<bool>(node, "noSummaryOffsets", o.noSummaryOffsets);
+    return true;
+  }
+};
+
+}  // namespace YAML
 
 namespace rosbag2_storage_plugins {
 
 using mcap::ByteOffset;
 using time_point = std::chrono::time_point<std::chrono::high_resolution_clock>;
 static const char FILE_EXTENSION[] = ".mcap";
+static const char LOG_NAME[] = "rosbag2_storage_mcap";
+
+static void OnProblem(const mcap::Status& status) {
+  RCUTILS_LOG_ERROR_NAMED(LOG_NAME, "%s", status.message.c_str());
+}
 
 /**
  * A storage implementation for the MCAP file format.
@@ -42,7 +152,7 @@ static const char FILE_EXTENSION[] = ".mcap";
 class MCAPStorage : public rosbag2_storage::storage_interfaces::ReadWriteInterface {
 public:
   MCAPStorage();
-  virtual ~MCAPStorage();
+  ~MCAPStorage() override;
 
   /** BaseIOInterface **/
 #ifdef ROSBAG2_STORAGE_MCAP_HAS_STORAGE_OPTIONS
@@ -72,7 +182,7 @@ public:
   void set_filter(const rosbag2_storage::StorageFilter& storage_filter) override;
   void reset_filter() override;
 #ifdef ROSBAG2_STORAGE_MCAP_OVERRIDE_SEEK_METHOD
-  void seek(const rcutils_time_point_value_t& timestamp) override;
+  void seek(const rcutils_time_point_value_t& time_stamp) override;
 #else
   void seek(const rcutils_time_point_value_t& timestamp);
 #endif
@@ -88,6 +198,10 @@ public:
   void remove_topic(const rosbag2_storage::TopicMetadata& topic) override;
 
 private:
+  void open_impl(const std::string& uri, rosbag2_storage::storage_interfaces::IOFlag io_flag,
+                 const std::string& storage_config_uri);
+
+  void reset_iterator(rcutils_time_point_value_t start_time = 0);
   bool read_and_enqueue_message();
   void ensure_summary_read();
 
@@ -96,12 +210,13 @@ private:
 
   std::shared_ptr<rosbag2_storage::SerializedBagMessage> next_;
 
-  rosbag2_storage::BagMetadata metadata_;
+  rosbag2_storage::BagMetadata metadata_{};
   std::unordered_map<std::string, rosbag2_storage::TopicInformation> topics_;
-  std::unordered_map<std::string, mcap::SchemaId> schema_ids;    // datatype -> schema_id
-  std::unordered_map<std::string, mcap::ChannelId> channel_ids;  // topic -> channel_id
-  rosbag2_storage::StorageFilter storage_filter_;
-  std::unordered_set<std::string> filter_topics_;
+  std::unordered_map<std::string, mcap::SchemaId> schema_ids_;    // datatype -> schema_id
+  std::unordered_map<std::string, mcap::ChannelId> channel_ids_;  // topic -> channel_id
+  rosbag2_storage::StorageFilter storage_filter_{};
+  mcap::ReadMessageOptions::ReadOrder read_order_ =
+    mcap::ReadMessageOptions::ReadOrder::LogTimeOrder;
 
   std::unique_ptr<std::ifstream> input_;
   std::unique_ptr<mcap::FileStreamReader> data_source_;
@@ -110,7 +225,7 @@ private:
   std::unique_ptr<mcap::LinearMessageView::Iterator> linear_iterator_;
 
   std::unique_ptr<mcap::McapWriter> mcap_writer_;
-  rosbag2_storage_mcap::internal::MessageDefinitionCache msgdef_cache_;
+  rosbag2_storage_mcap::internal::MessageDefinitionCache msgdef_cache_{};
 
   bool has_read_summary_ = false;
 };
@@ -136,12 +251,18 @@ MCAPStorage::~MCAPStorage() {
 #ifdef ROSBAG2_STORAGE_MCAP_HAS_STORAGE_OPTIONS
 void MCAPStorage::open(const rosbag2_storage::StorageOptions& storage_options,
                        rosbag2_storage::storage_interfaces::IOFlag io_flag) {
-  open(storage_options.uri, io_flag);
+  open_impl(storage_options.uri, io_flag, storage_options.storage_config_uri);
 }
 #endif
 
 void MCAPStorage::open(const std::string& uri,
                        rosbag2_storage::storage_interfaces::IOFlag io_flag) {
+  open_impl(uri, io_flag, "");
+}
+
+void MCAPStorage::open_impl(const std::string& uri,
+                            rosbag2_storage::storage_interfaces::IOFlag io_flag,
+                            const std::string& storage_config_uri) {
   switch (io_flag) {
     case rosbag2_storage::storage_interfaces::IOFlag::READ_ONLY: {
       relative_path_ = uri;
@@ -152,8 +273,7 @@ void MCAPStorage::open(const std::string& uri,
       if (!status.ok()) {
         throw std::runtime_error(status.message);
       }
-      linear_view_ = std::make_unique<mcap::LinearMessageView>(mcap_reader_->readMessages());
-      linear_iterator_ = std::make_unique<mcap::LinearMessageView::Iterator>(linear_view_->begin());
+      reset_iterator();
       break;
     }
     case rosbag2_storage::storage_interfaces::IOFlag::READ_WRITE:
@@ -163,7 +283,12 @@ void MCAPStorage::open(const std::string& uri,
       relative_path_ = uri + FILE_EXTENSION;
 
       mcap_writer_ = std::make_unique<mcap::McapWriter>();
-      mcap::McapWriterOptions options{"ros2"};
+      McapWriterOptions options;
+      if (!storage_config_uri.empty()) {
+        YAML::Node yaml_node = YAML::LoadFile(storage_config_uri);
+        options = yaml_node.as<McapWriterOptions>();
+      }
+
       auto status = mcap_writer_->open(relative_path_, options);
       if (!status.ok()) {
         throw std::runtime_error(status.message);
@@ -279,11 +404,55 @@ bool MCAPStorage::read_and_enqueue_message() {
   return true;
 }
 
+void MCAPStorage::reset_iterator(rcutils_time_point_value_t start_time) {
+  ensure_summary_read();
+  mcap::ReadMessageOptions options;
+  options.startTime = mcap::Timestamp(start_time);
+  options.readOrder = read_order_;
+  if (!storage_filter_.topics.empty()) {
+    options.topicFilter = [this](std::string_view topic) {
+      for (const auto& match_topic : storage_filter_.topics) {
+        if (match_topic == topic) {
+          return true;
+        }
+      }
+      return false;
+    };
+  }
+#ifdef ROSBAG2_STORAGE_MCAP_HAS_STORAGE_FILTER_TOPIC_REGEX
+  if (!storage_filter_.topics_regex.empty()) {
+    options.topicFilter = [this](std::string_view topic) {
+      std::smatch m;
+      std::string topic_string(topic);
+      std::regex re(storage_filter_.topics_regex);
+      return std::regex_match(topic_string, m, re);
+    };
+  }
+#endif
+  linear_view_ =
+    std::make_unique<mcap::LinearMessageView>(mcap_reader_->readMessages(OnProblem, options));
+  linear_iterator_ = std::make_unique<mcap::LinearMessageView::Iterator>(linear_view_->begin());
+}
+
 void MCAPStorage::ensure_summary_read() {
   if (!has_read_summary_) {
     const auto status = mcap_reader_->readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
+
     if (!status.ok()) {
       throw std::runtime_error(status.message);
+    }
+    // check if message indexes are present, if not, read in file order.
+    bool message_indexes_found = false;
+    for (const auto& ci : mcap_reader_->chunkIndexes()) {
+      if (ci.messageIndexLength > 0) {
+        message_indexes_found = true;
+        break;
+      }
+    }
+    if (!message_indexes_found) {
+      RCUTILS_LOG_WARN_NAMED(LOG_NAME,
+                             "no message indices found, falling back to reading in file order");
+      read_order_ = mcap::ReadMessageOptions::ReadOrder::FileOrder;
     }
     has_read_summary_ = true;
   }
@@ -298,18 +467,7 @@ bool MCAPStorage::has_next() {
     return true;
   }
 
-  // Continue reading messages until one matches the filter, or there are none left
-  while (true) {
-    if (!read_and_enqueue_message()) {
-      return false;
-    }
-    if (filter_topics_.empty() || filter_topics_.count(next_->topic_name)) {
-      break;
-    }
-    // Next message did not pass filter - throw it away and continue
-    next_.reset();
-  }
-  return true;
+  return read_and_enqueue_message();
 }
 
 std::shared_ptr<rosbag2_storage::SerializedBagMessage> MCAPStorage::read_next() {
@@ -332,8 +490,7 @@ std::vector<rosbag2_storage::TopicMetadata> MCAPStorage::get_all_topics_and_type
 /** ReadOnlyInterface **/
 void MCAPStorage::set_filter(const rosbag2_storage::StorageFilter& storage_filter) {
   storage_filter_ = storage_filter;
-  filter_topics_.clear();
-  filter_topics_.insert(storage_filter.topics.begin(), storage_filter.topics.end());
+  reset_iterator();
 }
 
 void MCAPStorage::reset_filter() {
@@ -341,11 +498,7 @@ void MCAPStorage::reset_filter() {
 }
 
 void MCAPStorage::seek(const rcutils_time_point_value_t& time_stamp) {
-  ensure_summary_read();
-
-  auto start_time = mcap::Timestamp(time_stamp);
-  linear_view_ = std::make_unique<mcap::LinearMessageView>(mcap_reader_->readMessages(start_time));
-  linear_iterator_ = std::make_unique<mcap::LinearMessageView::Iterator>(linear_view_->begin());
+  reset_iterator(time_stamp);
 }
 
 /** ReadWriteInterface **/
@@ -359,51 +512,25 @@ void MCAPStorage::write(std::shared_ptr<const rosbag2_storage::SerializedBagMess
   if (topic_it == topics_.end()) {
     throw std::runtime_error{"Unknown message topic \"" + msg->topic_name + "\""};
   }
-  const auto& topic_info = topic_it->second;
 
-  // Get or create a Schema reference
-  mcap::SchemaId schema_id;
-  const auto& datatype = topic_info.topic_metadata.type;
-  const auto schema_it = schema_ids.find(datatype);
-  if (schema_it == schema_ids.end()) {
-    std::string full_text = msgdef_cache_.get_full_text(datatype);
-    mcap::Schema schema;
-    schema.name = datatype;
-    schema.encoding = "ros2msg";
-    schema.data.assign(reinterpret_cast<const std::byte*>(full_text.data()),
-                       reinterpret_cast<const std::byte*>(full_text.data() + full_text.size()));
-    mcap_writer_->addSchema(schema);
-    schema_ids.emplace(datatype, schema.id);
-    schema_id = schema.id;
-  } else {
-    schema_id = schema_it->second;
+  // Get Channel reference
+  const auto channel_it = channel_ids_.find(msg->topic_name);
+  if (channel_it == channel_ids_.end()) {
+    // This should never happen since we adding channel on topic creation
+    throw std::runtime_error{"Channel reference not found for topic: \"" + msg->topic_name + "\""};
   }
 
-  // Get or create a Channel reference
-  mcap::ChannelId channel_id;
-  const auto channel_it = channel_ids.find(msg->topic_name);
-  if (channel_it == channel_ids.end()) {
-    mcap::Channel channel;
-    channel.topic = msg->topic_name;
-    channel.messageEncoding = topic_info.topic_metadata.serialization_format;
-    channel.schemaId = schema_id;
-    channel.metadata.emplace("offered_qos_profiles",
-                             topic_info.topic_metadata.offered_qos_profiles);
-    mcap_writer_->addChannel(channel);
-    channel_ids.emplace(msg->topic_name, channel.id);
-    channel_id = channel.id;
-  } else {
-    channel_id = channel_it->second;
+  mcap::Message mcap_msg;
+  mcap_msg.channelId = channel_it->second;
+  mcap_msg.sequence = 0;
+  if (msg->time_stamp < 0) {
+    RCUTILS_LOG_WARN_NAMED(LOG_NAME, "Invalid message timestamp %ld", msg->time_stamp);
   }
-
-  mcap::Message mcapMsg;
-  mcapMsg.channelId = channel_id;
-  mcapMsg.sequence = 0;
-  mcapMsg.logTime = mcap::Timestamp(std::chrono::nanoseconds(msg->time_stamp).count());
-  mcapMsg.publishTime = mcapMsg.logTime;
-  mcapMsg.dataSize = msg->serialized_data->buffer_length;
-  mcapMsg.data = reinterpret_cast<const std::byte*>(msg->serialized_data->buffer);
-  const auto status = mcap_writer_->write(mcapMsg);
+  mcap_msg.logTime = mcap::Timestamp(msg->time_stamp);
+  mcap_msg.publishTime = mcap_msg.logTime;
+  mcap_msg.dataSize = msg->serialized_data->buffer_length;
+  mcap_msg.data = reinterpret_cast<const std::byte*>(msg->serialized_data->buffer);
+  const auto status = mcap_writer_->write(mcap_msg);
   if (!status.ok()) {
     throw std::runtime_error{std::string{"Failed to write "} +
                              std::to_string(msg->serialized_data->buffer_length) +
@@ -428,8 +555,54 @@ void MCAPStorage::write(
 }
 
 void MCAPStorage::create_topic(const rosbag2_storage::TopicMetadata& topic) {
-  if (topics_.find(topic.name) == topics_.end()) {
-    topics_.emplace(topic.name, rosbag2_storage::TopicInformation{topic, 0});
+  auto topic_info = rosbag2_storage::TopicInformation{topic, 0};
+  const auto topic_it = topics_.find(topic.name);
+  if (topic_it == topics_.end()) {
+    topics_.emplace(topic.name, topic_info);
+  } else {
+    RCUTILS_LOG_WARN_NAMED(LOG_NAME, "Topic with name: %s already exist!", topic.name.c_str());
+    return;
+  }
+
+  // Create Schema for topic if it doesn't exist yet
+  const auto& datatype = topic_info.topic_metadata.type;
+  const auto schema_it = schema_ids_.find(datatype);
+  mcap::SchemaId schema_id;
+  if (schema_it == schema_ids_.end()) {
+    mcap::Schema schema;
+    schema.name = datatype;
+    try {
+      auto [format, full_text] = msgdef_cache_.get_full_text(datatype);
+      if (format == rosbag2_storage_mcap::internal::Format::MSG) {
+        schema.encoding = "ros2msg";
+      } else {
+        schema.encoding = "ros2idl";
+      }
+      schema.data.assign(reinterpret_cast<const std::byte*>(full_text.data()),
+                         reinterpret_cast<const std::byte*>(full_text.data() + full_text.size()));
+    } catch (rosbag2_storage_mcap::internal::DefinitionNotFoundError& err) {
+      RCUTILS_LOG_ERROR_NAMED(LOG_NAME, "definition file(s) missing for %s: missing %s",
+                              datatype.c_str(), err.what());
+      schema.encoding = "";
+    }
+    mcap_writer_->addSchema(schema);
+    schema_ids_.emplace(datatype, schema.id);
+    schema_id = schema.id;
+  } else {
+    schema_id = schema_it->second;
+  }
+
+  // Create Channel for topic if it doesn't exist yet
+  const auto channel_it = channel_ids_.find(topic.name);
+  if (channel_it == channel_ids_.end()) {
+    mcap::Channel channel;
+    channel.topic = topic.name;
+    channel.messageEncoding = topic_info.topic_metadata.serialization_format;
+    channel.schemaId = schema_id;
+    channel.metadata.emplace("offered_qos_profiles",
+                             topic_info.topic_metadata.offered_qos_profiles);
+    mcap_writer_->addChannel(channel);
+    channel_ids_.emplace(topic.name, channel.id);
   }
 }
 
