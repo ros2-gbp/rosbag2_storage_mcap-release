@@ -57,6 +57,7 @@ endif()
 # COMPATIBILITY(foxy, galactic, humble) - 0.17.x is the Rolling release.
 if(${rosbag2_storage_VERSION} VERSION_GREATER_EQUAL 0.17.0)
   list(APPEND MCAP_COMPILE_DEFS ROSBAG2_STORAGE_MCAP_HAS_STORAGE_FILTER_TOPIC_REGEX)
+  list(APPEND MCAP_COMPILE_DEFS ROSBAG2_STORAGE_MCAP_HAS_SET_READ_ORDER)
 endif()
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE ${MCAP_COMPILE_DEFS})
@@ -82,6 +83,8 @@ if(BUILD_TESTING)
   find_package(rosbag2_cpp REQUIRED)
   find_package(rosbag2_test_common REQUIRED)
   find_package(std_msgs REQUIRED)
+
+  add_definitions(-D_TEST_RESOURCES_DIR_PATH="${CMAKE_CURRENT_SOURCE_DIR}/test/${PROJECT_NAME}")
 
   set(ament_cmake_clang_format_CONFIG_FILE .clang-format)
   list(APPEND AMENT_LINT_AUTO_EXCLUDE ament_cmake_uncrustify)
